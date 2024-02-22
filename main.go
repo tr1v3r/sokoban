@@ -36,20 +36,18 @@ var (
 )
 
 func checker(s *SokobanState) []Direction {
-	s.refix()
 	if !s.alive() {
 		return nil
 	}
 	return []Direction{UP, DOWN, LEFT, RIGHT}
+	// return []Direction{UP, RIGHT, DOWN, LEFT}
 }
 func processor(s *SokobanState, direct Direction) (state *SokobanState) {
-	defer func() {
-		if state != nil {
-			state.Print()
-		}
-	}()
+	defer func() { state.refix() }()
 	return s.move(direct)
 }
+
+// ############## state ############
 
 var _ State = new(SokobanState)
 
@@ -67,6 +65,9 @@ type SokobanState struct {
 }
 
 func (s *SokobanState) Preprocess() error {
+	if s == nil {
+		return fmt.Errorf("nil state")
+	}
 	if len(s.boxes) != len(s.targets) {
 		return fmt.Errorf("targets num must equal to box num: %d != %d", len(s.targets), len(s.boxes))
 	}
@@ -75,13 +76,14 @@ func (s *SokobanState) Preprocess() error {
 }
 
 func (s *SokobanState) refix() *SokobanState {
+	if s == nil {
+		return nil
+	}
 	sort.Slice(s.boxes, func(i, j int) bool { return s.boxes[i].x < s.boxes[j].x || s.boxes[i].y < s.boxes[j].y })
 	return s
 }
 
-func (s *SokobanState) alive() bool {
-	return s.ttl > 0 && !s.boxInCorner() && !s.Done()
-}
+func (s *SokobanState) alive() bool { return s.ttl > 0 && !s.boxInCorner() && !s.Done() }
 
 func (s *SokobanState) boxInCorner() bool {
 	for _, box := range s.boxes {
@@ -138,10 +140,8 @@ func (s *SokobanState) getBox(p *pos) *pos {
 }
 
 func (s *SokobanState) Done() bool {
-	boxes, targets := s.boxes, s.targets
-
-	for i := range boxes {
-		if !boxes[i].on(targets[i]) {
+	for i := range s.boxes {
+		if !s.boxes[i].on(s.targets[i]) {
 			return false
 		}
 	}
@@ -210,6 +210,8 @@ func (s *SokobanState) getPos(p *pos) byte {
 	return s.wall[p.x][p.y]
 }
 
+// ############## pos ############
+
 type pos struct {
 	x int
 	y int
@@ -240,7 +242,10 @@ func (p *pos) move(direct Direction, stepSize int) *pos {
 func (p pos) jump(direct Direction, stepSize int) *pos { return p.move(direct, stepSize) }
 func (p pos) duplicate() *pos                          { return &p }
 
+// ############## main ############
+
 func main() {
+	start := time.Now()
 	finalStep, err := NewBruter(checker, processor, true).Find(&SokobanState{
 		size: &pos{4, 7},
 		wall: [][]byte{
@@ -260,20 +265,23 @@ func main() {
 		fmt.Printf("pre process fail: %s", err)
 		return
 	}
-	steps := finalStep.GetFullSteps()
-	if len(steps) == 0 {
+	fmt.Printf("find path cost: %s\n", time.Since(start))
+
+	steps, operations := finalStep.GetFullSteps()
+	if len(steps) == 0 || len(operations) == 0 {
 		fmt.Printf("no path found")
 		return
 	}
 
-	fmt.Printf("cost %d steps\n", len(steps))
-	for _, s := range steps {
-		fmt.Printf("%c", s.Operate)
+	fmt.Printf("cost %d steps\n", len(operations))
+	for _, o := range operations {
+		fmt.Printf("%c", o)
 	}
 	fmt.Println()
+
 	for _, s := range steps {
 		time.Sleep(300 * time.Millisecond)
-		fmt.Printf("Operate: %c\n", s.Operate)
+		fmt.Printf("step: %d\n", s.cost)
 		s.State.Print()
 	}
 	fmt.Println()

@@ -10,46 +10,59 @@ type State interface {
 	Preprocess() error
 }
 
-type StepArray[S State, O any] []*Step[S, O]
+func NewStep[S State, O any](s S, lastStep *Step[S, O]) *Step[S, O] {
+	if lastStep == nil {
+		return &Step[S, O]{State: s, children: make(map[*O]*Step[S, O])}
+	}
+	return &Step[S, O]{
+		State: s,
+
+		cost:     lastStep.cost + 1,
+		parent:   lastStep,
+		children: make(map[*O]*Step[S, O]),
+	}
+}
 
 type Step[S State, O any] struct {
-	State   S
-	Operate O
+	State S
 
 	cost     int
 	parent   *Step[S, O]
-	childern StepArray[S, O]
+	children map[*O]*Step[S, O]
 }
 
 func (s *Step[S, O]) visited(key string) bool {
 	return key == s.State.Key() || (s.parent != nil && s.parent.visited(key))
 }
 
-func (s *Step[S, O]) GetFullSteps() (steps StepArray[S, O]) {
+func (s *Step[S, O]) GetFullSteps() (steps []*Step[S, O], operations []O) {
 	if s == nil {
-		return nil
+		return nil, nil
 	}
 
 	for steps = append(steps, s); s.parent != nil; s = s.parent {
 		steps = append(steps, s.parent)
 	}
 	slices.Reverse(steps)
-	return steps
-}
 
-func (s *Step[S, O]) Graft(parent *Step[S, O], operate O) {
-	s.parent = parent
-	s.Operate = operate
-	s.RefixCost(parent.cost + 1)
-}
-
-func (s *Step[S, O]) RefixCost(cost int) {
-	if s.cost <= cost {
-		return
+	for i, step := range steps[1:] {
+		for o, s := range steps[i].children {
+			if s.State.Key() == step.State.Key() {
+				operations = append(operations, *o)
+				break
+			}
+		}
 	}
-	s.cost = cost
-	for _, child := range s.childern {
-		child.RefixCost(s.cost + 1)
+	return steps, operations
+}
+
+func (s *Step[S, O]) RefixChildren() {
+	for _, child := range s.children {
+		if child.cost > s.cost+1 {
+			child.parent = s
+			child.cost = s.cost + 1
+			child.RefixChildren()
+		}
 	}
 }
 
@@ -75,15 +88,14 @@ func (b Bruter[S, O]) Find(state S) (finalStep *Step[S, O], err error) {
 	if err := state.Preprocess(); err != nil {
 		return nil, err
 	}
-	step := b.walkByStep(&Step[S, O]{State: state})
-
-	steps := step.GetFullSteps()
-	_ = steps
-	return step, nil
+	return b.walkByStep(NewStep[S, O](state, nil)), nil
 }
 
 func (b Bruter[S, O]) walkByStep(s *Step[S, O]) (finalStep *Step[S, O]) {
+	var finalSteps []*Step[S, O]
 	for _, o := range b.check(s.State) {
+		o := o
+		// TODO check nextStep == nil
 		nextState := b.process(s.State, o)
 
 		key := nextState.Key()
@@ -95,34 +107,34 @@ func (b Bruter[S, O]) walkByStep(s *Step[S, O]) (finalStep *Step[S, O]) {
 			continue
 		}
 
-		if brutedState := b.steps[key]; brutedState != nil {
-			if brutedState.cost > s.cost+1 {
-				s.childern = append(s.childern, brutedState)
-				brutedState.Graft(s, o)
+		var nextStep *Step[S, O]
+		if nextStep = b.steps[key]; nextStep != nil {
+			s.children[&o] = nextStep
+			if s.cost+1 >= nextStep.cost {
+				continue
 			}
-			continue
+			s.RefixChildren()
+		} else {
+			nextStep = NewStep(nextState, s)
+			s.children[&o] = nextStep
+			b.steps[key] = nextStep
 		}
-
-		nextStep := &Step[S, O]{
-			State:   nextState,
-			Operate: o,
-
-			cost:   s.cost + 1,
-			parent: s,
-		}
-		b.steps[key] = nextStep
-		s.childern = append(s.childern, nextStep)
 
 		if nextState.Done() {
 			return nextStep
 		}
 
-		if step := b.walkByStep(nextStep); step == nil {
-			continue
-		} else if !b.findBest {
-			return step
-		} else if finalStep == nil || finalStep.cost > step.cost {
-			finalStep = step
+		if step := b.walkByStep(nextStep); step != nil {
+			if !b.findBest {
+				return step
+			}
+			finalSteps = append(finalSteps, step)
+		}
+	}
+
+	for _, s := range finalSteps {
+		if finalStep == nil || finalStep.cost > s.cost {
+			finalStep = s
 		}
 	}
 	return finalStep
