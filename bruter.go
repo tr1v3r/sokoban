@@ -10,32 +10,36 @@ type State interface {
 	Preprocess() error
 }
 
-func NewStep[S State, O any](s S, lastStep *Step[S, O]) *Step[S, O] {
+type Operator interface {
+	Key() string
+}
+
+func NewStep[S State, O Operator](s S, lastStep *Step[S, O]) *Step[S, O] {
 	if lastStep == nil {
-		return &Step[S, O]{State: s, children: make(map[*O]*Step[S, O])}
+		return &Step[S, O]{State: s, children: make(map[string]*Step[S, O])}
 	}
 	return &Step[S, O]{
 		State: s,
 
 		cost:     lastStep.cost + 1,
 		parent:   lastStep,
-		children: make(map[*O]*Step[S, O]),
+		children: make(map[string]*Step[S, O]),
 	}
 }
 
-type Step[S State, O any] struct {
+type Step[S State, O Operator] struct {
 	State S
 
 	cost     int
 	parent   *Step[S, O]
-	children map[*O]*Step[S, O]
+	children map[string]*Step[S, O]
 }
 
 func (s *Step[S, O]) visited(key string) bool {
 	return key == s.State.Key() || (s.parent != nil && s.parent.visited(key))
 }
 
-func (s *Step[S, O]) GetFullSteps() (steps []*Step[S, O], operations []O) {
+func (s *Step[S, O]) GetFullSteps() (operations []string, steps []*Step[S, O]) {
 	if s == nil {
 		return nil, nil
 	}
@@ -48,12 +52,12 @@ func (s *Step[S, O]) GetFullSteps() (steps []*Step[S, O], operations []O) {
 	for i, step := range steps[1:] {
 		for o, s := range steps[i].children {
 			if s.State.Key() == step.State.Key() {
-				operations = append(operations, *o)
+				operations = append(operations, o)
 				break
 			}
 		}
 	}
-	return steps, operations
+	return operations, steps
 }
 
 func (s *Step[S, O]) RefixChildren() {
@@ -66,7 +70,7 @@ func (s *Step[S, O]) RefixChildren() {
 	}
 }
 
-func NewBruter[S State, O any](checker func(S) []O, processor func(S, O) S, findBest bool) *Bruter[S, O] {
+func NewBruter[S State, O Operator](checker func(S) []O, processor func(S, O) S, findBest bool) *Bruter[S, O] {
 	return &Bruter[S, O]{
 		steps:    make(map[string]*Step[S, O]),
 		findBest: findBest,
@@ -75,7 +79,7 @@ func NewBruter[S State, O any](checker func(S) []O, processor func(S, O) S, find
 	}
 }
 
-type Bruter[S State, O any] struct {
+type Bruter[S State, O Operator] struct {
 	steps map[string]*Step[S, O]
 
 	findBest bool
@@ -94,7 +98,6 @@ func (b Bruter[S, O]) Find(state S) (finalStep *Step[S, O], err error) {
 func (b Bruter[S, O]) walkByStep(s *Step[S, O]) (finalStep *Step[S, O]) {
 	var finalSteps []*Step[S, O]
 	for _, o := range b.check(s.State) {
-		o := o
 		// TODO check nextStep == nil
 		nextState := b.process(s.State, o)
 
@@ -109,14 +112,17 @@ func (b Bruter[S, O]) walkByStep(s *Step[S, O]) (finalStep *Step[S, O]) {
 
 		var nextStep *Step[S, O]
 		if nextStep = b.steps[key]; nextStep != nil {
-			s.children[&o] = nextStep
+			if _, has := s.children[o.Key()]; has {
+				continue
+			}
+			s.children[o.Key()] = nextStep
 			if s.cost+1 >= nextStep.cost {
 				continue
 			}
 			s.RefixChildren()
 		} else {
 			nextStep = NewStep(nextState, s)
-			s.children[&o] = nextStep
+			s.children[o.Key()] = nextStep
 			b.steps[key] = nextStep
 		}
 

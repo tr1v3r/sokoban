@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
 type Direction byte
+
+func (d Direction) Key() string { return string(d) }
 
 const (
 	UP    Direction = 'u'
@@ -39,7 +42,9 @@ func checker(s *SokobanState) []Direction {
 	if !s.alive() {
 		return nil
 	}
-	return []Direction{UP, DOWN, LEFT, RIGHT}
+	// return []Direction{UP, DOWN, LEFT, RIGHT}
+	// return []Direction{UP, LEFT, DOWN, RIGHT}
+	return []Direction{DOWN, LEFT, RIGHT, UP}
 	// return []Direction{UP, RIGHT, DOWN, LEFT}
 }
 func processor(s *SokobanState, direct Direction) (state *SokobanState) {
@@ -71,7 +76,10 @@ func (s *SokobanState) Preprocess() error {
 	if len(s.boxes) != len(s.targets) {
 		return fmt.Errorf("targets num must equal to box num: %d != %d", len(s.targets), len(s.boxes))
 	}
-	sort.Slice(s.targets, func(i, j int) bool { return s.targets[i].x < s.targets[j].x || s.targets[i].y < s.targets[j].y })
+	sort.Slice(s.targets, func(i, j int) bool {
+		return s.targets[i].x*(s.size.y+1)+s.targets[i].y < s.targets[j].x*(s.size.y+1)+s.targets[j].y
+	})
+	s.refix()
 	return nil
 }
 
@@ -79,7 +87,9 @@ func (s *SokobanState) refix() *SokobanState {
 	if s == nil {
 		return nil
 	}
-	sort.Slice(s.boxes, func(i, j int) bool { return s.boxes[i].x < s.boxes[j].x || s.boxes[i].y < s.boxes[j].y })
+	sort.Slice(s.boxes, func(i, j int) bool {
+		return s.boxes[i].x*(s.size.y+1)+s.boxes[i].y < s.boxes[j].x*(s.size.y+1)+s.boxes[j].y
+	})
 	return s
 }
 
@@ -170,9 +180,7 @@ func (s *SokobanState) Print() {
 
 	for i, row := range s.wall {
 		m = append(m, make([]byte, len(row)))
-		for j, c := range row {
-			m[i][j] = c
-		}
+		copy(m[i], row)
 	}
 
 	for _, p := range s.targets {
@@ -267,17 +275,13 @@ func main() {
 	}
 	fmt.Printf("find path cost: %s\n", time.Since(start))
 
-	steps, operations := finalStep.GetFullSteps()
+	operations, steps := finalStep.GetFullSteps()
 	if len(steps) == 0 || len(operations) == 0 {
 		fmt.Printf("no path found")
 		return
 	}
 
-	fmt.Printf("cost %d steps\n", len(operations))
-	for _, o := range operations {
-		fmt.Printf("%c", o)
-	}
-	fmt.Println()
+	fmt.Printf("cost %d steps\n%s\n", len(operations), strings.Join(operations, ""))
 
 	for _, s := range steps {
 		time.Sleep(300 * time.Millisecond)
