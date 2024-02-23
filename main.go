@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"github.com/tr1v3r/pkg/brute"
 )
 
 type Direction byte
@@ -59,7 +61,7 @@ func countDistance(from *pos, to ...*pos) (d float64) {
 
 // ############## state ############
 
-var _ State = new(SokobanState)
+var _ brute.State = new(SokobanState)
 
 type SokobanState struct {
 	// static
@@ -70,7 +72,7 @@ type SokobanState struct {
 	boxes  []*pos
 	player *pos
 
-	by Direction
+	after Direction
 
 	ttl int
 	key string
@@ -149,7 +151,7 @@ func (s *SokobanState) move(direct Direction) (nextState *SokobanState) {
 	return nextState
 }
 
-func (s SokobanState) next(by Direction) *SokobanState {
+func (s SokobanState) next(direct Direction) *SokobanState {
 	boxes := make([]*pos, len(s.boxes))
 	for i, box := range s.boxes {
 		boxes[i] = box.duplicate()
@@ -159,7 +161,7 @@ func (s SokobanState) next(by Direction) *SokobanState {
 	s.player = s.player.duplicate()
 
 	s.key = ""
-	s.by = by
+	s.after = direct
 	s.ttl--
 
 	return &s
@@ -267,7 +269,7 @@ func (p pos) duplicate() *pos                          { return &p }
 
 func main() {
 	start := time.Now()
-	finalStep, err := NewBruter(process).Find(&SokobanState{
+	finalStep, err := brute.NewBruter(process).Find(&SokobanState{
 		size: &pos{4, 7},
 		wall: [][]byte{
 			{' ', '#', '#', '#', ' ', ' ', '#', '#'},
@@ -281,7 +283,7 @@ func main() {
 		player:  &pos{4, 3},
 
 		ttl: 10000,
-	}, "bfs")
+	}, brute.DFS)
 	if err != nil {
 		fmt.Printf("pre process fail: %s", err)
 		return
@@ -296,13 +298,13 @@ func main() {
 
 	fmt.Printf("cost %d steps\n", len(steps)-1)
 	for _, s := range steps {
-		fmt.Print(string(s.State.by))
+		fmt.Print(string(s.State.after))
 	}
 	fmt.Println()
 
 	for _, s := range steps {
 		time.Sleep(300 * time.Millisecond)
-		fmt.Printf("step: %d\n", s.cost)
+		fmt.Printf("step: %d\n", s.Cost())
 		s.State.Print()
 	}
 }
