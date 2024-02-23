@@ -2,14 +2,12 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sort"
-	"strings"
 	"time"
 )
 
 type Direction byte
-
-func (d Direction) Key() string { return string(d) }
 
 const (
 	UP    Direction = 'u'
@@ -26,30 +24,37 @@ const (
 	PlayerChar      byte = '*'
 )
 
-var (
-	m = [][]byte{
-		{' ', '#', '#', '#', ' ', ' ', '#', '#'},
-		{' ', '#', ' ', ' ', ' ', ' ', ' ', '#'},
-		{'#', '#', ' ', ' ', ' ', '#', ' ', '#'},
-		{'#', ' ', ' ', ' ', ' ', ' ', ' ', '#'},
-		{'#', ' ', ' ', ' ', ' ', ' ', '#', '#'},
-	}
-	targetPos = []*pos{{2, 2}, {3, 2}, {3, 4}, {3, 5}}
-	boxPos    = []*pos{{2, 2}, {3, 2}, {3, 3}, {3, 4}}
-)
-
-func checker(s *SokobanState) []Direction {
+func direct(s *SokobanState) []Direction { return []Direction{UP, DOWN, LEFT, RIGHT} }
+func process(s *SokobanState) (states []*SokobanState) {
 	if !s.alive() {
 		return nil
 	}
-	// return []Direction{UP, DOWN, LEFT, RIGHT}
-	// return []Direction{UP, LEFT, DOWN, RIGHT}
-	return []Direction{DOWN, LEFT, RIGHT, UP}
-	// return []Direction{UP, RIGHT, DOWN, LEFT}
+
+	for _, d := range direct(s) {
+		if state := s.move(d); state != nil {
+			states = append(states, state.refix())
+		}
+	}
+
+	var targetDistances, boxDistances = make([]float64, len(states)), make([]float64, len(states))
+	for i, s := range states {
+		targetDistances[i], boxDistances[i] = s.targetDistance(), s.boxDistance()
+	}
+	sort.Slice(states, func(i, j int) bool {
+		if targetDistances[i] == targetDistances[j] {
+			return boxDistances[i] < boxDistances[j]
+		}
+		return targetDistances[i] < targetDistances[j]
+	})
+
+	return states
 }
-func processor(s *SokobanState, direct Direction) (state *SokobanState) {
-	defer func() { state.refix() }()
-	return s.move(direct)
+
+func countDistance(from *pos, to ...*pos) (d float64) {
+	for _, t := range to {
+		d += from.distance(t)
+	}
+	return d
 }
 
 // ############## state ############
@@ -64,6 +69,8 @@ type SokobanState struct {
 
 	boxes  []*pos
 	player *pos
+
+	by Direction
 
 	ttl int
 	key string
@@ -84,16 +91,33 @@ func (s *SokobanState) Preprocess() error {
 }
 
 func (s *SokobanState) refix() *SokobanState {
-	if s == nil {
-		return nil
-	}
 	sort.Slice(s.boxes, func(i, j int) bool {
 		return s.boxes[i].x*(s.size.y+1)+s.boxes[i].y < s.boxes[j].x*(s.size.y+1)+s.boxes[j].y
 	})
+
+	if s.key == "" {
+		s.key += fmt.Sprint(s.player.x*(s.size.y+1) + s.player.y)
+		for _, box := range s.boxes {
+			s.key += "_" + fmt.Sprint(box.x*(s.size.y+1)+box.y)
+		}
+	}
 	return s
 }
 
-func (s *SokobanState) alive() bool { return s.ttl > 0 && !s.boxInCorner() && !s.Done() }
+func (s *SokobanState) targetDistance() (distance float64) {
+	for i, b := range s.boxes {
+		distance += s.targets[i].distance(b)
+	}
+	return distance
+}
+func (s *SokobanState) boxDistance() (distance float64) {
+	for _, b := range s.boxes {
+		distance += s.player.distance(b)
+	}
+	return distance
+}
+
+func (s *SokobanState) alive() bool { return s.ttl > 0 && !s.boxInCorner() }
 
 func (s *SokobanState) boxInCorner() bool {
 	for _, box := range s.boxes {
@@ -115,17 +139,17 @@ func (s *SokobanState) move(direct Direction) (nextState *SokobanState) {
 
 	switch {
 	case n == BlankChar:
-		nextState = s.next()
+		nextState = s.next(direct)
 		nextState.player.move(direct, 1)
 	case n == BoxChar && nn == BlankChar:
-		nextState = s.next()
+		nextState = s.next(direct)
 		nextState.player.move(direct, 1)
 		nextState.getBox(nextState.player).move(direct, 1)
 	}
 	return nextState
 }
 
-func (s SokobanState) next() *SokobanState {
+func (s SokobanState) next(by Direction) *SokobanState {
 	boxes := make([]*pos, len(s.boxes))
 	for i, box := range s.boxes {
 		boxes[i] = box.duplicate()
@@ -135,6 +159,7 @@ func (s SokobanState) next() *SokobanState {
 	s.player = s.player.duplicate()
 
 	s.key = ""
+	s.by = by
 	s.ttl--
 
 	return &s
@@ -158,22 +183,7 @@ func (s *SokobanState) Done() bool {
 	return true
 }
 
-func (s *SokobanState) Key() string {
-	if s == nil {
-		return ""
-	}
-	if s.key != "" {
-		return s.key
-	}
-
-	key := fmt.Sprint(s.player.x*(s.size.y+1) + s.player.y)
-	for _, box := range s.boxes {
-		key += "_" + fmt.Sprint(box.x*(s.size.y+1)+box.y)
-	}
-	s.key = key
-
-	return key
-}
+func (s *SokobanState) Key() string { return s.key }
 
 func (s *SokobanState) Print() {
 	var m [][]byte
@@ -225,6 +235,9 @@ type pos struct {
 	y int
 }
 
+func (p *pos) distance(t *pos) float64 {
+	return math.Abs(float64(p.x-t.x)) + math.Abs(float64(p.y-t.y))
+}
 func (p *pos) on(t *pos) bool { return p.x == t.x && p.y == t.y }
 func (p *pos) in(ts ...*pos) bool {
 	for _, t := range ts {
@@ -254,7 +267,7 @@ func (p pos) duplicate() *pos                          { return &p }
 
 func main() {
 	start := time.Now()
-	finalStep, err := NewBruter(checker, processor, true).Find(&SokobanState{
+	finalStep, err := NewBruter(process).Find(&SokobanState{
 		size: &pos{4, 7},
 		wall: [][]byte{
 			{' ', '#', '#', '#', ' ', ' ', '#', '#'},
@@ -267,26 +280,29 @@ func main() {
 		boxes:   []*pos{{2, 2}, {3, 2}, {3, 3}, {3, 4}},
 		player:  &pos{4, 3},
 
-		ttl: 1000,
-	})
+		ttl: 10000,
+	}, "bfs")
 	if err != nil {
 		fmt.Printf("pre process fail: %s", err)
 		return
 	}
 	fmt.Printf("find path cost: %s\n", time.Since(start))
 
-	operations, steps := finalStep.GetFullSteps()
-	if len(steps) == 0 || len(operations) == 0 {
+	steps := finalStep.Backtrack()
+	if len(steps) == 0 {
 		fmt.Printf("no path found")
 		return
 	}
 
-	fmt.Printf("cost %d steps\n%s\n", len(operations), strings.Join(operations, ""))
+	fmt.Printf("cost %d steps\n", len(steps)-1)
+	for _, s := range steps {
+		fmt.Print(string(s.State.by))
+	}
+	fmt.Println()
 
 	for _, s := range steps {
 		time.Sleep(300 * time.Millisecond)
 		fmt.Printf("step: %d\n", s.cost)
 		s.State.Print()
 	}
-	fmt.Println()
 }
