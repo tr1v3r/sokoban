@@ -49,37 +49,25 @@ func process(s *SokobanState) (states []*SokobanState) {
 
 	var except = 5 - s.by
 	for _, d := range direct(s) {
-		if d == except {
+		if s.pushBox != 1 && d == except {
 			continue
 		}
 		if state := s.move(d); state != nil {
-			states = append(states, state.refix())
+			states = append(states, state.refix().analyze())
 		}
 	}
 	if len(states) <= 1 {
 		return states
 	}
 
-	var (
-		targetDistances = make([]float64, len(states))
-		boxDistances    = make([]float64, len(states))
-		pushBox         = make([]byte, len(states))
-	)
-	for i, s := range states {
-		targetDistances[i] = s.targetDistance()
-		boxDistances[i] = s.boxDistance()
-		if s.pushBox {
-			pushBox[i] = 1
-		}
-	}
 	sort.Slice(states, func(i, j int) bool {
-		if targetDistances[i] == targetDistances[j] {
-			if boxDistances[i] == boxDistances[j] {
-				return pushBox[i] > pushBox[j]
-			}
-			return boxDistances[i] < boxDistances[j]
+		if states[i].targetSteps != states[j].targetSteps {
+			return states[i].targetSteps < states[j].targetSteps
 		}
-		return targetDistances[i] < targetDistances[j]
+		if states[i].boxDistance != states[j].boxDistance {
+			return states[i].boxDistance < states[j].boxDistance
+		}
+		return states[i].pushBox > states[j].pushBox
 	})
 	return states
 }
@@ -97,11 +85,15 @@ type SokobanState struct {
 	boxes  []*pos
 	player *pos
 
-	by      Direction
-	pushBox bool
+	by Direction
 
 	ttl int
 	key string
+
+	// valuation
+	pushBox     byte
+	targetSteps float64
+	boxDistance float64
 }
 
 func (s *SokobanState) Preprocess() error {
@@ -132,17 +124,14 @@ func (s *SokobanState) refix() *SokobanState {
 	return s
 }
 
-func (s *SokobanState) targetDistance() (distance float64) {
+func (s *SokobanState) analyze() *SokobanState {
 	for i, b := range s.boxes {
-		distance += s.targets[i].distance(b)
+		s.targetSteps += s.targets[i].steps(b)
 	}
-	return distance
-}
-func (s *SokobanState) boxDistance() (distance float64) {
 	for _, b := range s.boxes {
-		distance += s.player.distance(b)
+		s.boxDistance += s.player.distance(b)
 	}
-	return distance
+	return s
 }
 
 func (s *SokobanState) alive() bool { return s.ttl > 0 && !s.boxInCorner() }
@@ -173,7 +162,7 @@ func (s *SokobanState) move(direct Direction) (nextState *SokobanState) {
 		nextState = s.next(direct)
 		nextState.player.move(direct, 1)
 		nextState.getBox(nextState.player).move(direct, 1)
-		nextState.pushBox = true
+		nextState.pushBox = 1
 	}
 	return nextState
 }
@@ -189,8 +178,11 @@ func (s SokobanState) next(direct Direction) *SokobanState {
 
 	s.key = ""
 	s.by = direct
-	s.pushBox = false
 	s.ttl--
+
+	s.pushBox = 0
+	s.targetSteps = 0
+	s.boxDistance = 0
 
 	return &s
 }
@@ -265,8 +257,11 @@ type pos struct {
 	y int
 }
 
-func (p *pos) distance(t *pos) float64 {
+func (p *pos) steps(t *pos) float64 {
 	return math.Abs(float64(p.x-t.x)) + math.Abs(float64(p.y-t.y))
+}
+func (p *pos) distance(t *pos) float64 {
+	return math.Sqrt(math.Pow(float64(p.x-t.x), 2) + math.Pow(float64(p.y-t.y), 2))
 }
 func (p *pos) on(t *pos) bool { return p.x == t.x && p.y == t.y }
 func (p *pos) in(ts ...*pos) bool {
