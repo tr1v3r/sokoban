@@ -11,11 +11,26 @@ import (
 
 type Direction byte
 
+func (d Direction) String() string {
+	switch d {
+	case UP:
+		return "u"
+	case LEFT:
+		return "l"
+	case RIGHT:
+		return "r"
+	case DOWN:
+		return "d"
+	default:
+		return ""
+	}
+}
+
 const (
-	UP    Direction = 'u'
-	DOWN  Direction = 'd'
-	LEFT  Direction = 'l'
-	RIGHT Direction = 'r'
+	UP    Direction = 1
+	LEFT  Direction = 2
+	RIGHT Direction = 3
+	DOWN  Direction = 4
 
 	OutRangeChar         = 0
 	BlankChar       byte = ' '
@@ -26,37 +41,47 @@ const (
 	PlayerChar      byte = '*'
 )
 
-func direct(s *SokobanState) []Direction { return []Direction{UP, DOWN, LEFT, RIGHT} }
+func direct(s *SokobanState) []Direction { return []Direction{UP, LEFT, RIGHT, DOWN} }
 func process(s *SokobanState) (states []*SokobanState) {
 	if !s.alive() {
 		return nil
 	}
 
+	var except = 5 - s.by
 	for _, d := range direct(s) {
+		if d == except {
+			continue
+		}
 		if state := s.move(d); state != nil {
 			states = append(states, state.refix())
 		}
 	}
+	if len(states) <= 1 {
+		return states
+	}
 
-	var targetDistances, boxDistances = make([]float64, len(states)), make([]float64, len(states))
+	var (
+		targetDistances = make([]float64, len(states))
+		boxDistances    = make([]float64, len(states))
+		pushBox         = make([]byte, len(states))
+	)
 	for i, s := range states {
-		targetDistances[i], boxDistances[i] = s.targetDistance(), s.boxDistance()
+		targetDistances[i] = s.targetDistance()
+		boxDistances[i] = s.boxDistance()
+		if s.pushBox {
+			pushBox[i] = 1
+		}
 	}
 	sort.Slice(states, func(i, j int) bool {
 		if targetDistances[i] == targetDistances[j] {
+			if boxDistances[i] == boxDistances[j] {
+				return pushBox[i] > pushBox[j]
+			}
 			return boxDistances[i] < boxDistances[j]
 		}
 		return targetDistances[i] < targetDistances[j]
 	})
-
 	return states
-}
-
-func countDistance(from *pos, to ...*pos) (d float64) {
-	for _, t := range to {
-		d += from.distance(t)
-	}
-	return d
 }
 
 // ############## state ############
@@ -72,7 +97,8 @@ type SokobanState struct {
 	boxes  []*pos
 	player *pos
 
-	after Direction
+	by      Direction
+	pushBox bool
 
 	ttl int
 	key string
@@ -147,6 +173,7 @@ func (s *SokobanState) move(direct Direction) (nextState *SokobanState) {
 		nextState = s.next(direct)
 		nextState.player.move(direct, 1)
 		nextState.getBox(nextState.player).move(direct, 1)
+		nextState.pushBox = true
 	}
 	return nextState
 }
@@ -161,7 +188,8 @@ func (s SokobanState) next(direct Direction) *SokobanState {
 	s.player = s.player.duplicate()
 
 	s.key = ""
-	s.after = direct
+	s.by = direct
+	s.pushBox = false
 	s.ttl--
 
 	return &s
@@ -298,13 +326,13 @@ func main() {
 
 	fmt.Printf("cost %d steps\n", len(steps)-1)
 	for _, s := range steps {
-		fmt.Print(string(s.State.after))
+		fmt.Print(s.State.by.String())
 	}
 	fmt.Println()
 
 	for _, s := range steps {
 		time.Sleep(300 * time.Millisecond)
-		fmt.Printf("step: %d\n", s.Cost())
+		fmt.Printf("step: %d - %s\n", s.Cost(), s.State.key)
 		s.State.Print()
 	}
 }
